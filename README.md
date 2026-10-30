@@ -1,12 +1,12 @@
 # JobFly
 
-JobFly is a React + Vite job portal hosted on Netlify. Firebase Authentication handles accounts and Cloud Firestore stores job listings and applications. The original Django application and SQLite database remain in the repository, but are not used by the new frontend.
+JobFly is a React + Vite job portal deployed to Firebase Hosting. Firebase Authentication handles accounts and Cloud Firestore stores job listings and applications. The original Django application and SQLite database remain in the repository, but are not used by the new frontend.
 
 The first release includes public job search, category and location filters, job details, job-seeker/employer registration, login, and job applications. Employer dashboards and job posting are planned for a later phase.
 
 ## Current deployment
 
-The frontend is published at [jobfly-shakon53.netlify.app](https://jobfly-shakon53.netlify.app). The dedicated Firebase project [`jobfly-shakon53-prod`](https://console.firebase.google.com/project/jobfly-shakon53-prod/overview) and its Web app have been created. Firestore is not active yet, so live listings, accounts, and applications remain unavailable until the database and Email/Password authentication are enabled and the Netlify environment variables are set.
+The frontend is published at [jobfly-shakon53-prod.web.app](https://jobfly-shakon53-prod.web.app). The older [Netlify deployment](https://jobfly-shakon53.netlify.app) is retained as a fallback and may not have the latest version. The dedicated Firebase project [`jobfly-shakon53-prod`](https://console.firebase.google.com/project/jobfly-shakon53-prod/overview) and its Web app have been created. Firestore, Email/Password authentication, and the Firebase web configuration for the production build still need to be enabled; until then, the site uses sample listings and accounts/applications are unavailable.
 
 ## Run locally
 
@@ -34,7 +34,7 @@ Without Firebase settings, local development uses clearly labelled sample listin
 4. Deploy the Firestore security rules and query index from this repository. Install and authenticate the Firebase CLI if needed, then run:
 
    ```powershell
-   firebase deploy --only firestore:rules,firestore:indexes --project YOUR_FIREBASE_PROJECT_ID
+   firebase deploy --only firestore:rules,firestore:indexes --project jobfly-shakon53-prod
    ```
 
    Alternatively, publish `firestore.rules` using the Firestore Rules console. The composite job-listing index is in `firestore.indexes.json`.
@@ -48,7 +48,7 @@ Without Firebase settings, local development uses clearly labelled sample listin
    ```
 
    These Firebase web configuration values are intended for client apps. Never place service-account credentials or private keys in the frontend.
-6. In **Authentication → Settings → Authorized domains**, add `jobfly-shakon53.netlify.app` and `localhost`.
+6. In **Authentication → Settings → Authorized domains**, add `jobfly-shakon53-prod.web.app`, `jobfly-shakon53.netlify.app` if using the fallback, and `localhost`.
 
 The Firestore rules keep user profiles private, allow public reads of active jobs and categories, and restrict applications to their signed-in job-seeker owner. An application's initial status is fixed to `pending`, and duplicate applications use a deterministic document ID.
 
@@ -56,9 +56,20 @@ The Firestore rules keep user profiles private, allow public reads of active job
 
 The MVP does not yet include an employer job-posting dashboard. Add category documents to the `categories` collection and job documents to `jobs` in the Firebase console. Job documents need `title`, `description`, `requirements`, `location`, `job_type`, `posted_at` (a Firestore timestamp), `is_active` (boolean), `category_name`, `company_name`, and `company_industry`. `job_type` must be `full_time`, `part_time`, `contract`, or `internship`. `salary` and `deadline` are optional.
 
-## Deploy to Netlify
+## Deploy to Firebase Hosting
 
-The site is already published at the URL above. Add these variables in **Netlify → Site configuration → Environment variables**:
+Set the four Firebase web configuration values in `frontend/.env.local` before building. From the repository root, run:
+
+```powershell
+npm run build --prefix frontend
+firebase deploy --only hosting --project jobfly-shakon53-prod
+```
+
+`firebase.json` publishes `frontend/dist` and rewrites SPA routes to `index.html`.
+
+## Netlify fallback
+
+The existing Netlify site is an older fallback. If deploying it again, add these variables in **Netlify → Site configuration → Environment variables**:
 
 - `VITE_FIREBASE_API_KEY`
 - `VITE_FIREBASE_AUTH_DOMAIN`
