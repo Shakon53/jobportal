@@ -4,6 +4,10 @@ JobFly is being migrated from a server-rendered Django app to a React + Vite fro
 
 The first release includes public job search, category and location filters, job details, job-seeker/employer sign-up, login, and job applications. Employer dashboards and job posting are planned for a later phase. The original Django project remains in the repository during the migration.
 
+## Current deployment
+
+The frontend is published at [jobfly-shakon53.netlify.app](https://jobfly-shakon53.netlify.app). The live site currently shows a setup notice until a running Supabase project is connected and its public URL/key are added to Netlify.
+
 ## Run the frontend locally
 
 1. Install Node.js 22 or newer.
@@ -41,7 +45,7 @@ The browser uses only the public publishable/anon key. Row-level security protec
 ## Deploy to Netlify
 
 1. Push this repository to GitHub and import it in Netlify.
-2. Netlify reads [`netlify.toml`](./netlify.toml): base directory `frontend`, build command `npm run build`, publish directory `dist`.
+2. Netlify reads [`netlify.toml`](./netlify.toml): base directory `frontend`, build command `npm run build`, publish directory `frontend/dist`.
 3. Add `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` under **Site configuration → Environment variables**.
 4. Trigger a deploy. The redirect rule in `netlify.toml` supports direct links to React routes.
 5. Add the deployed `https://<site-name>.netlify.app` URL to Supabase's authentication redirect allow list.

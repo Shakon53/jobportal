@@ -43,4 +43,6 @@ ENV/
 .DS_Store
 
 # Windows
-Thumbs.db 
+Thumbs.db
+# Local Netlify folder
+.netlify
