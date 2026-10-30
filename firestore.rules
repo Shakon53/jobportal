@@ -1,0 +1,178 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function owns(userId) {
+      return signedIn() && request.auth.uid == userId;
+    }
+
+    function hasRole(userId, role) {
+      return owns(userId)
+        && get(/databases/$(database)/documents/profiles/$(userId)).data.role == role;
+    }
+
+    function hasRoleAfter(userId, role) {
+      return owns(userId)
+        && getAfter(/databases/$(database)/documents/profiles/$(userId)).data.role == role;
+    }
+
+    function validJob(job) {
+      return job.keys().hasOnly([
+          'employer_id',
+          'category_name',
+          'company_name',
+          'company_industry',
+          'title',
+          'description',
+          'requirements',
+          'location',
+          'salary',
+          'job_type',
+          'posted_at',
+          'deadline',
+          'is_active'
+        ])
+        && job.employer_id is string
+        && job.title is string
+        && job.title.size() > 0
+        && job.title.size() <= 200
+        && job.description is string
+        && job.description.size() <= 20000
+        && job.requirements is string
+        && job.requirements.size() <= 20000
+        && job.location is string
+        && job.location.size() <= 100
+        && job.company_name is string
+        && job.company_name.size() <= 120
+        && job.company_industry is string
+        && job.company_industry.size() <= 100
+        && job.category_name is string
+        && job.category_name.size() <= 100
+        && job.job_type in ['full_time', 'part_time', 'contract', 'internship']
+        && job.is_active is bool;
+    }
+
+    match /profiles/{userId} {
+      allow get: if owns(userId);
+      allow list: if false;
+
+      allow create: if owns(userId)
+        && request.resource.data.keys().hasOnly(['username', 'role', 'created_at'])
+        && request.resource.data.keys().hasAll(['username', 'role', 'created_at'])
+        && request.resource.data.username is string
+        && request.resource.data.username.size() >= 3
+        && request.resource.data.username.size() <= 40
+        && request.resource.data.role in ['job_seeker', 'employer']
+        && request.resource.data.created_at == request.time;
+
+      allow update: if owns(userId)
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['username'])
+        && request.resource.data.role == resource.data.role
+        && request.resource.data.username is string
+        && request.resource.data.username.size() >= 3
+        && request.resource.data.username.size() <= 40;
+      allow delete: if false;
+    }
+
+    match /employer_profiles/{userId} {
+      allow read: if true;
+      allow create: if hasRoleAfter(userId, 'employer')
+        && request.resource.data.keys().hasOnly(['company_name', 'industry'])
+        && request.resource.data.company_name is string
+        && request.resource.data.company_name.size() > 0
+        && request.resource.data.company_name.size() <= 120
+        && request.resource.data.industry is string
+        && request.resource.data.industry.size() <= 100;
+      allow update: if hasRole(userId, 'employer')
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['company_name', 'industry'])
+        && request.resource.data.company_name is string
+        && request.resource.data.company_name.size() > 0
+        && request.resource.data.company_name.size() <= 120
+        && request.resource.data.industry is string
+        && request.resource.data.industry.size() <= 100;
+      allow delete: if false;
+    }
+
+    match /job_seeker_profiles/{userId} {
+      allow read: if owns(userId);
+      allow create: if hasRoleAfter(userId, 'job_seeker')
+        && request.resource.data.keys().hasOnly(['skills', 'experience', 'education', 'resume_path'])
+        && request.resource.data.skills is string
+        && request.resource.data.experience is string
+        && request.resource.data.education is string
+        && request.resource.data.resume_path == null;
+      allow update: if owns(userId)
+        && hasRole(userId, 'job_seeker')
+        && request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(['skills', 'experience', 'education', 'resume_path']);
+      allow delete: if false;
+    }
+
+    match /categories/{categoryId} {
+      allow read: if true;
+      allow write: if false;
+    }
+
+    match /jobs/{jobId} {
+      allow read: if resource.data.is_active == true
+        || (signedIn() && resource.data.employer_id == request.auth.uid);
+
+      allow create: if hasRole(request.auth.uid, 'employer')
+        && validJob(request.resource.data)
+        && request.resource.data.employer_id == request.auth.uid
+        && request.resource.data.company_name
+          == get(/databases/$(database)/documents/employer_profiles/$(request.auth.uid)).data.company_name
+        && request.resource.data.posted_at == request.time;
+
+      allow update: if hasRole(request.auth.uid, 'employer')
+        && resource.data.employer_id == request.auth.uid
+        && validJob(request.resource.data)
+        && request.resource.data.employer_id == resource.data.employer_id
+        && request.resource.data.posted_at == resource.data.posted_at;
+
+      allow delete: if hasRole(request.auth.uid, 'employer')
+        && resource.data.employer_id == request.auth.uid;
+    }
+
+    match /applications/{applicationId} {
+      allow get: if signedIn()
+        && (applicationId.matches('.*__' + request.auth.uid)
+          || resource.data.job_seeker_id == request.auth.uid
+          || (hasRole(request.auth.uid, 'employer')
+            && get(/databases/$(database)/documents/jobs/$(resource.data.job_id)).data.employer_id
+              == request.auth.uid));
+
+      allow list: if signedIn()
+        && (resource.data.job_seeker_id == request.auth.uid
+          || (hasRole(request.auth.uid, 'employer')
+            && get(/databases/$(database)/documents/jobs/$(resource.data.job_id)).data.employer_id
+              == request.auth.uid));
+
+      allow create: if hasRole(request.auth.uid, 'job_seeker')
+        && applicationId == request.resource.data.job_id + '__' + request.auth.uid
+        && request.resource.data.keys().hasOnly([
+          'job_id',
+          'job_seeker_id',
+          'cover_letter',
+          'status',
+          'applied_at',
+          'updated_at'
+        ])
+        && request.resource.data.job_id is string
+        && request.resource.data.job_seeker_id == request.auth.uid
+        && (request.resource.data.cover_letter == null
+          || (request.resource.data.cover_letter is string
+            && request.resource.data.cover_letter.size() <= 5000))
+        && request.resource.data.status == 'pending'
+        && request.resource.data.applied_at == request.time
+        && request.resource.data.updated_at == request.time
+        && get(/databases/$(database)/documents/jobs/$(request.resource.data.job_id)).data.is_active == true;
+
+      allow update, delete: if false;
+    }
+  }
+}

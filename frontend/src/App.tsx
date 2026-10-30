@@ -1,23 +1,10 @@
 import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react'
 import { Link, NavLink, Navigate, Route, Routes, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { ArrowDown, ArrowLeft, ArrowRight, BriefcaseBusiness, Building2, Check, ChevronDown, Clock3, MapPin, Search, ShieldCheck, Sparkles, Users, X } from 'lucide-react'
-import type { User } from '@supabase/supabase-js'
-import { supabase } from './lib/supabase'
-
-type Category = { id: string; name: string; icon: string }
-type Job = {
-  id: string
-  title: string
-  description: string
-  requirements: string
-  location: string
-  salary: string | null
-  job_type: string
-  posted_at: string
-  deadline: string | null
-  categories: { name: string } | null
-  employer_profiles: { company_name: string; industry: string | null } | null
-}
+import { createUserWithEmailAndPassword, deleteUser, onAuthStateChanged, signInWithEmailAndPassword, signOut as firebaseSignOut, type User } from 'firebase/auth'
+import { doc, onSnapshot } from 'firebase/firestore'
+import { firebaseAuth, firebaseConfigError, firebaseConfigured, firestore } from './lib/firebase'
+import { createAccountProfile, fetchCategories, fetchJobs, submitApplication, type AccountRole, type Category, type Job } from './lib/firestore'
 
 const demoCategories: Category[] = [
   { id: 'technology', name: 'Technology', icon: '⌘' },
@@ -81,52 +68,49 @@ function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : 'Something went wrong. Please try again.'
 }
 
-function userRole(user: User) {
-  const role: unknown = user.user_metadata.role
-  return role === 'job_seeker' || role === 'employer' ? role : null
-}
-
 function App() {
   const [user, setUser] = useState<User | null>(null)
-  const isDemoMode = import.meta.env.DEV && !supabase
+  const [role, setRole] = useState<AccountRole | null>(null)
+  const [username, setUsername] = useState('')
+  const isDemoMode = import.meta.env.DEV && !firebaseConfigured
   const [jobs, setJobs] = useState<Job[]>(isDemoMode ? demoJobs : [])
   const [categories, setCategories] = useState<Category[]>(isDemoMode ? demoCategories : [])
-  const [loading, setLoading] = useState(Boolean(supabase))
+  const [loading, setLoading] = useState(firebaseConfigured)
   const [loadError, setLoadError] = useState('')
 
   useEffect(() => {
-    if (!supabase) return
+    const auth = firebaseAuth
+    const database = firestore
+    if (!auth || !database) return
 
     let active = true
-    void supabase.auth.getSession().then(({ data, error }) => {
-      if (!active) return
-      if (error) setLoadError(error.message)
-      setUser(data.session?.user ?? null)
-    }).catch((error: unknown) => {
-      if (active) setLoadError(errorMessage(error))
-    })
+    let profileUnsubscribe: (() => void) | undefined
+    const authUnsubscribe = onAuthStateChanged(auth, (nextUser) => {
+      profileUnsubscribe?.()
+      setUser(nextUser)
+      setRole(null)
+      setUsername('')
+      if (!nextUser) return
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setUser(session?.user ?? null)
+      profileUnsubscribe = onSnapshot(doc(database, 'profiles', nextUser.uid), (snapshot) => {
+        const profile = snapshot.data()
+        const nextRole = profile?.role
+        setRole(nextRole === 'job_seeker' || nextRole === 'employer' ? nextRole : null)
+        setUsername(typeof profile?.username === 'string' ? profile.username : '')
+      }, (error: Error) => {
+        if (active) setLoadError(error.message)
+      })
+    }, (error: Error) => {
+      if (active) setLoadError(error.message)
     })
 
     void Promise.all([
-      supabase.from('jobs')
-        .select('id,title,description,requirements,location,salary,job_type,posted_at,deadline,categories(name),employer_profiles(company_name,industry)')
-        .eq('is_active', true)
-        .order('posted_at', { ascending: false })
-        .limit(100)
-        .returns<Job[]>(),
-      supabase.from('categories')
-        .select('id,name,icon')
-        .order('name')
-        .returns<Category[]>(),
-    ]).then(([jobsResult, categoriesResult]) => {
+      fetchJobs(database),
+      fetchCategories(database),
+    ]).then(([nextJobs, nextCategories]) => {
       if (!active) return
-      if (jobsResult.error) setLoadError(jobsResult.error.message)
-      else setJobs(jobsResult.data ?? [])
-      if (categoriesResult.error) setLoadError(categoriesResult.error.message)
-      else setCategories(categoriesResult.data ?? [])
+      setJobs(nextJobs)
+      setCategories(nextCategories)
       setLoading(false)
     }).catch((error: unknown) => {
       if (!active) return
@@ -136,26 +120,27 @@ function App() {
 
     return () => {
       active = false
-      subscription.unsubscribe()
+      profileUnsubscribe?.()
+      authUnsubscribe()
     }
   }, [])
 
   return (
     <div className="app-shell">
-      <Header user={user} />
-      {!supabase && (
+      <Header user={user} username={username} />
+      {!firebaseConfigured && (
         <div className={`setup-notice ${import.meta.env.DEV ? '' : 'setup-notice-production'}`}>
           <Sparkles size={16} />
-          <span>{import.meta.env.DEV
-            ? 'Preview mode — connect a Supabase project to enable live jobs, accounts, and applications.'
-            : 'This site is being set up. Live jobs and accounts will be available soon.'}</span>
+          <span>{firebaseConfigError || (import.meta.env.DEV
+            ? 'Preview mode — connect Firebase to enable live jobs, accounts, and applications.'
+            : 'This site is being set up. Live jobs and accounts will be available soon.')}</span>
         </div>
       )}
       {loadError && <div className="error-banner" role="alert">{loadError}</div>}
       <Routes>
         <Route path="/" element={<HomePage jobs={jobs} categories={categories} loading={loading} />} />
         <Route path="/jobs" element={<JobsPage jobs={jobs} categories={categories} loading={loading} />} />
-        <Route path="/jobs/:id" element={<JobDetailPage jobs={jobs} loading={loading} user={user} />} />
+        <Route path="/jobs/:id" element={<JobDetailPage jobs={jobs} loading={loading} user={user} role={role} />} />
         <Route path="/login" element={user ? <Navigate to="/" replace /> : <AuthPage mode="login" />} />
         <Route path="/signup" element={user ? <Navigate to="/" replace /> : <AuthPage mode="signup" />} />
         <Route path="*" element={<NotFound />} />
@@ -165,13 +150,16 @@ function App() {
   )
 }
 
-function Header({ user }: { user: User | null }) {
+function Header({ user, username }: { user: User | null; username: string }) {
   const [menuOpen, setMenuOpen] = useState(false)
 
   async function signOut() {
-    if (!supabase) return
-    const { error } = await supabase.auth.signOut()
-    if (error) window.alert(error.message)
+    if (!firebaseAuth) return
+    try {
+      await firebaseSignOut(firebaseAuth)
+    } catch (error: unknown) {
+      window.alert(errorMessage(error))
+    }
   }
 
   return (
@@ -191,7 +179,7 @@ function Header({ user }: { user: User | null }) {
         <div className={`header-actions ${menuOpen ? 'is-open' : ''}`}>
           {user ? (
             <>
-              <span className="signed-in">Hi, {String(user.user_metadata.username ?? user.email?.split('@')[0] ?? 'there')}</span>
+              <span className="signed-in">Hi, {username || user.email?.split('@')[0] || 'there'}</span>
               <button className="button button-outline button-small" onClick={() => void signOut()}>Sign out</button>
             </>
           ) : (
@@ -401,7 +389,7 @@ function JobCard({ job }: { job: Job }) {
   )
 }
 
-function JobDetailPage({ jobs, loading, user }: { jobs: Job[]; loading: boolean; user: User | null }) {
+function JobDetailPage({ jobs, loading, user, role }: { jobs: Job[]; loading: boolean; user: User | null; role: AccountRole | null }) {
   const { id } = useParams()
   const job = jobs.find((item) => item.id === id)
 
@@ -432,32 +420,24 @@ function JobDetailPage({ jobs, loading, user }: { jobs: Job[]; loading: boolean;
             {job.deadline && <p className="deadline-copy">Apply by {new Date(`${job.deadline}T00:00:00`).toLocaleDateString()}</p>}
           </div>
         </article>
-        <ApplyPanel job={job} user={user} />
+        <ApplyPanel job={job} user={user} role={role} />
       </div>
     </main>
   )
 }
 
-function ApplyPanel({ job, user }: { job: Job; user: User | null }) {
+function ApplyPanel({ job, user, role }: { job: Job; user: User | null; role: AccountRole | null }) {
   const [coverLetter, setCoverLetter] = useState('')
   const [message, setMessage] = useState('')
   const [submitting, setSubmitting] = useState(false)
-  const role = user ? userRole(user) : null
-
   async function apply(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    if (!supabase || !user) return
+    if (!firestore || !user) return
     setSubmitting(true)
     setMessage('')
     try {
-      const { error } = await supabase.from('applications').insert({
-        job_id: job.id,
-        job_seeker_id: user.id,
-        cover_letter: coverLetter.trim() || null,
-      })
-      if (error?.code === '23505') setMessage('You’ve already applied for this role.')
-      else if (error) setMessage(error.message)
-      else setMessage('Your application has been sent. Good luck!')
+      const result = await submitApplication(firestore, job.id, user.uid, coverLetter.trim())
+      setMessage(result === 'duplicate' ? 'You’ve already applied for this role.' : 'Your application has been sent. Good luck!')
     } catch (submitError: unknown) {
       setMessage(errorMessage(submitError))
     } finally {
@@ -469,8 +449,8 @@ function ApplyPanel({ job, user }: { job: Job; user: User | null }) {
     <aside className="apply-panel">
       <h2>Interested in this role?</h2>
       <p>Take the next step and introduce yourself to the team.</p>
-      {!supabase ? (
-        <div className="inline-notice">Applications will be enabled once Supabase is connected.</div>
+      {!firestore ? (
+        <div className="inline-notice">Applications will be enabled once Firebase is connected.</div>
       ) : !user ? (
         <Link className="button button-primary button-full" to="/login">Log in to apply <ArrowRight size={16} /></Link>
       ) : role !== 'job_seeker' ? (
@@ -504,24 +484,28 @@ function AuthPage({ mode }: { mode: 'login' | 'signup' }) {
     event.preventDefault()
     setError('')
     setMessage('')
-    if (!supabase) {
-      setError('Connect Supabase to enable accounts. See the setup instructions in README.md.')
+    if (!firebaseAuth || !firestore) {
+      setError(firebaseConfigError || 'Connect Firebase to enable accounts. See the setup instructions in README.md.')
       return
     }
     setSubmitting(true)
     try {
       if (isSignup) {
-        const { data, error: signUpError } = await supabase.auth.signUp({
-          email,
-          password,
-          options: { data: { username: username.trim(), role, company_name: companyName.trim() } },
-        })
-        if (signUpError) throw signUpError
-        if (data.session) navigate('/')
-        else setMessage('Check your email to confirm your account, then come back to log in.')
+        const credential = await createUserWithEmailAndPassword(firebaseAuth, email, password)
+        try {
+          await createAccountProfile(firestore, credential.user.uid, username.trim(), role, companyName.trim())
+        } catch (profileError: unknown) {
+          try {
+            await deleteUser(credential.user)
+          } catch (cleanupError: unknown) {
+            await firebaseSignOut(firebaseAuth)
+            throw new Error(`Account setup failed: ${errorMessage(profileError)} Account cleanup also failed: ${errorMessage(cleanupError)}`)
+          }
+          throw profileError
+        }
+        navigate('/')
       } else {
-        const { error: signInError } = await supabase.auth.signInWithPassword({ email, password })
-        if (signInError) throw signInError
+        await signInWithEmailAndPassword(firebaseAuth, email, password)
         navigate('/')
       }
     } catch (submitError: unknown) {
