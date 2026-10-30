@@ -46,3 +46,7 @@ ENV/
 Thumbs.db
 # Local Netlify folder
 .netlify
+.firebase
+firebase-debug.log
+firestore-debug.log
+ui-debug.log
