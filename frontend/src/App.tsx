@@ -88,8 +88,9 @@ function userRole(user: User) {
 
 function App() {
   const [user, setUser] = useState<User | null>(null)
-  const [jobs, setJobs] = useState<Job[]>(supabase ? [] : demoJobs)
-  const [categories, setCategories] = useState<Category[]>(supabase ? [] : demoCategories)
+  const isDemoMode = import.meta.env.DEV && !supabase
+  const [jobs, setJobs] = useState<Job[]>(isDemoMode ? demoJobs : [])
+  const [categories, setCategories] = useState<Category[]>(isDemoMode ? demoCategories : [])
   const [loading, setLoading] = useState(Boolean(supabase))
   const [loadError, setLoadError] = useState('')
 
@@ -143,9 +144,11 @@ function App() {
     <div className="app-shell">
       <Header user={user} />
       {!supabase && (
-        <div className="setup-notice">
+        <div className={`setup-notice ${import.meta.env.DEV ? '' : 'setup-notice-production'}`}>
           <Sparkles size={16} />
-          <span>Preview mode — connect a Supabase project to enable live jobs, accounts, and applications.</span>
+          <span>{import.meta.env.DEV
+            ? 'Preview mode — connect a Supabase project to enable live jobs, accounts, and applications.'
+            : 'This site is being set up. Live jobs and accounts will be available soon.'}</span>
         </div>
       )}
       {loadError && <div className="error-banner" role="alert">{loadError}</div>}
@@ -267,7 +270,7 @@ function HomePage({ jobs, categories, loading }: { jobs: Job[]; categories: Cate
           <Link className="text-link" to="/jobs">Browse all <ArrowRight size={16} /></Link>
         </div>
         <div className="category-grid">
-          {(categories.length ? categories : demoCategories).map((category, index) => (
+          {(categories.length ? categories : import.meta.env.DEV ? demoCategories : []).map((category, index) => (
             <Link key={category.id} className="category-card" to={`/jobs?category=${encodeURIComponent(category.name)}`}>
               <span className={`category-icon category-icon-${index % 4}`}>{category.icon || '✳'}</span>
               <span className="category-name">{category.name}</span>
